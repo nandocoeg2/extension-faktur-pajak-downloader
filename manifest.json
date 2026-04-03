@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Coretax Faktur Pajak Downloader",
+  "version": "0.1.0",
+  "description": "Menambahkan checkbox dan bulk download PDF pada tabel submitted return sheets di Coretax.",
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://coretaxdjp.pajak.go.id/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://coretaxdjp.pajak.go.id/returnsheets-portal/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Coretax Faktur Pajak Downloader"
+  }
+}
