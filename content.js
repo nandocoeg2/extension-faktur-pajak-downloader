@@ -2,14 +2,30 @@
   const TABLE_ROOT_SELECTOR = "#table-el";
   const HEADER_ROW_SELECTOR = "thead.p-datatable-thead tr:first-child";
   const DATA_ROW_SELECTOR = "tbody.p-datatable-tbody > tr";
-  const DOWNLOAD_BUTTON_SELECTOR = "button#SubmittedDownloadPdfButton";
-  const SUPPORTED_PATH_FRAGMENT = "/submitted-returnsheets";
   const TOOLBAR_ID = "ctfp-toolbar";
   const MASTER_CHECKBOX_ID = "ctfp-select-all";
   const ROW_CHECKBOX_CLASS = "ctfp-row-checkbox";
   const DEFAULT_DELAY_MS = 1500;
   const MIN_DELAY_MS = 500;
   const MAX_DELAY_MS = 10000;
+  const PAGE_CONFIGS = [
+    {
+      key: "submitted-returnsheets",
+      pathFragment: "/submitted-returnsheets",
+      toolbarTitle: "Bulk PDF",
+      selectionMode: "custom",
+      downloadButtonSelector: "button#SubmittedDownloadPdfButton",
+      dataCellStartIndex: 1,
+    },
+    {
+      key: "output-tax",
+      pathFragment: "/output-tax",
+      toolbarTitle: "Download PDF",
+      selectionMode: "native",
+      downloadButtonSelector: "button#DownloadButton",
+      dataCellStartIndex: 2,
+    },
+  ];
 
   const state = {
     selectedKeys: new Set(),
@@ -21,13 +37,27 @@
     routeTimer: null,
     progressCurrent: 0,
     progressTotal: 0,
+    currentPageKey: null,
   };
 
-  function isSupportedPage() {
+  function getCurrentConfig() {
+    if (window.location.hostname !== "coretaxdjp.pajak.go.id") {
+      return null;
+    }
+
     return (
-      window.location.hostname === "coretaxdjp.pajak.go.id" &&
-      window.location.pathname.includes(SUPPORTED_PATH_FRAGMENT)
+      PAGE_CONFIGS.find((config) =>
+        window.location.pathname.includes(config.pathFragment)
+      ) ?? null
     );
+  }
+
+  function isSupportedPage() {
+    return Boolean(getCurrentConfig());
+  }
+
+  function usesCustomSelection(config = getCurrentConfig()) {
+    return config?.selectionMode === "custom";
   }
 
   function normalizeText(value) {
@@ -60,25 +90,30 @@
     );
   }
 
-  function getRowKey(row) {
-    const cells = Array.from(row.querySelectorAll(":scope > td")).slice(1);
+  function getRowKey(row, config = getCurrentConfig()) {
+    const startIndex = config?.dataCellStartIndex ?? 1;
+    const cells = Array.from(row.querySelectorAll(":scope > td")).slice(startIndex);
     return cells.map((cell) => normalizeText(cell.textContent)).join(" | ");
   }
 
-  function getVisibleRowKeys(root = getTableRoot()) {
+  function getVisibleRowKeys(root = getTableRoot(), config = getCurrentConfig()) {
+    if (!usesCustomSelection(config)) {
+      return new Set();
+    }
+
     return new Set(
       getDataRows(root)
-        .map((row) => getRowKey(row))
+        .map((row) => getRowKey(row, config))
         .filter(Boolean)
     );
   }
 
-  function pruneSelection(root = getTableRoot()) {
-    if (state.isDownloading) {
+  function pruneSelection(root = getTableRoot(), config = getCurrentConfig()) {
+    if (state.isDownloading || !usesCustomSelection(config)) {
       return;
     }
 
-    const visibleKeys = getVisibleRowKeys(root);
+    const visibleKeys = getVisibleRowKeys(root, config);
 
     if (!visibleKeys.size) {
       return;
@@ -103,26 +138,28 @@
     return Math.min(MAX_DELAY_MS, Math.max(MIN_DELAY_MS, rawValue));
   }
 
-  function ensureToolbar(root = getTableRoot()) {
-    if (!root) {
+  function ensureToolbar(root = getTableRoot(), config = getCurrentConfig()) {
+    if (!root || !config) {
       return null;
     }
 
     let toolbar = getToolbar(root);
     const header = root.querySelector(".p-datatable-header") ?? root;
 
-    if (!toolbar) {
+    if (!toolbar || toolbar.dataset.pageKey !== config.key) {
+      toolbar?.remove();
       toolbar = document.createElement("div");
       toolbar.id = TOOLBAR_ID;
       toolbar.className = "ctfp-toolbar";
+      toolbar.dataset.pageKey = config.key;
       toolbar.innerHTML = `
-        <div class="ctfp-toolbar-title">Bulk PDF Downloader</div>
-        <button type="button" class="ctfp-btn" data-action="select-visible">Pilih semua halaman ini</button>
-        <button type="button" class="ctfp-btn ctfp-btn-secondary" data-action="clear-visible">Reset pilihan</button>
-        <button type="button" class="ctfp-btn ctfp-btn-primary" data-action="download">Download terpilih</button>
+        <div class="ctfp-toolbar-title">${config.toolbarTitle}</div>
+        <button type="button" class="ctfp-btn" data-action="select-visible">Pilih semua</button>
+        <button type="button" class="ctfp-btn ctfp-btn-secondary" data-action="clear-visible">Reset</button>
+        <button type="button" class="ctfp-btn ctfp-btn-primary" data-action="download">Download</button>
         <button type="button" class="ctfp-btn ctfp-btn-danger" data-action="stop" disabled>Stop</button>
         <label class="ctfp-delay">
-          Delay
+          Jeda
           <input type="number" class="ctfp-delay-input" min="${MIN_DELAY_MS}" max="${MAX_DELAY_MS}" step="100" value="${DEFAULT_DELAY_MS}" />
           <span>ms</span>
         </label>
@@ -135,25 +172,29 @@
       toolbar
         .querySelector('[data-action="select-visible"]')
         ?.addEventListener("click", () => {
-          setAllVisibleRows(true, root);
+          setAllVisibleRows(true, root, config);
         });
 
       toolbar
         .querySelector('[data-action="clear-visible"]')
         ?.addEventListener("click", () => {
-          clearVisibleSelection(root);
+          clearVisibleSelection(root, config);
         });
 
       toolbar
         .querySelector('[data-action="download"]')
         ?.addEventListener("click", () => {
-          void startDownload(root);
+          void startDownload(root, config);
         });
 
       toolbar.querySelector('[data-action="stop"]')?.addEventListener("click", () => {
         state.shouldStop = true;
-        updateToolbarStatus(root, "Permintaan stop diterima. Menunggu item aktif selesai.");
-        syncToolbarDisabledState(root);
+        updateToolbarStatus(
+          root,
+          config,
+          "Stop diminta..."
+        );
+        syncToolbarDisabledState(root, config);
       });
 
       toolbar.querySelector(".ctfp-delay-input")?.addEventListener("change", () => {
@@ -163,7 +204,7 @@
         }
 
         input.value = String(getDelayMs(root));
-        updateToolbarStatus(root);
+        updateToolbarStatus(root, config);
       });
 
       toolbar.dataset.bound = "true";
@@ -172,7 +213,20 @@
     return toolbar;
   }
 
-  function ensureHeaderCheckbox(root = getTableRoot()) {
+  function cleanupCustomSelectionUI(root = getTableRoot(), config = getCurrentConfig()) {
+    if (!root || usesCustomSelection(config)) {
+      return;
+    }
+
+    root.querySelectorAll(".ctfp-header-toggle").forEach((node) => node.remove());
+    root.querySelectorAll(".ctfp-row-toggle").forEach((node) => node.remove());
+  }
+
+  function ensureHeaderCheckbox(root = getTableRoot(), config = getCurrentConfig()) {
+    if (!usesCustomSelection(config)) {
+      return;
+    }
+
     const headerRow = getHeaderRow(root);
     const firstHeaderCell = headerRow?.querySelector(":scope > th:first-child");
 
@@ -193,13 +247,13 @@
 
       wrapper.querySelector("input")?.addEventListener("change", (event) => {
         const checkbox = event.currentTarget;
-        setAllVisibleRows(Boolean(checkbox?.checked), root);
+        setAllVisibleRows(Boolean(checkbox?.checked), root, config);
       });
     }
   }
 
-  function setRowSelected(row, selected) {
-    const key = getRowKey(row);
+  function setRowSelected(row, selected, config = getCurrentConfig()) {
+    const key = getRowKey(row, config);
 
     if (!key) {
       return;
@@ -207,10 +261,8 @@
 
     if (selected) {
       state.selectedKeys.add(key);
-      row.classList.add("ctfp-row-selected");
     } else {
       state.selectedKeys.delete(key);
-      row.classList.remove("ctfp-row-selected");
     }
   }
 
@@ -231,49 +283,112 @@
 
       wrapper.querySelector("input")?.addEventListener("change", (event) => {
         const checkbox = event.currentTarget;
-        setRowSelected(row, Boolean(checkbox?.checked));
-        syncMasterCheckbox();
-        updateToolbarStatus();
+        const config = getCurrentConfig();
+        setRowSelected(row, Boolean(checkbox?.checked), config);
+        syncMasterCheckbox(getTableRoot(), config);
+        syncRowHighlight(getTableRoot(), config);
+        updateToolbarStatus(getTableRoot(), config);
       });
     }
 
     return wrapper.querySelector("input");
   }
 
-  function ensureRowCheckboxes(root = getTableRoot()) {
+  function ensureRowCheckboxes(root = getTableRoot(), config = getCurrentConfig()) {
+    if (!usesCustomSelection(config)) {
+      return;
+    }
+
     getDataRows(root).forEach((row) => {
       const checkbox = ensureRowCheckbox(row);
-      const isSelected = state.selectedKeys.has(getRowKey(row));
+      const isSelected = state.selectedKeys.has(getRowKey(row, config));
 
       if (checkbox) {
         checkbox.checked = isSelected;
       }
-
-      row.classList.toggle("ctfp-row-selected", isSelected);
     });
   }
 
-  function setAllVisibleRows(selected, root = getTableRoot()) {
+  function getNativeRowCheckboxBox(row) {
+    const firstCell = row.querySelector(":scope > td:first-child");
+    return (
+      firstCell?.querySelector('.p-checkbox-box[role="checkbox"], [role="checkbox"].p-checkbox-box') ??
+      null
+    );
+  }
+
+  function isNativeRowSelected(row) {
+    return getNativeRowCheckboxBox(row)?.getAttribute("aria-checked") === "true";
+  }
+
+  function setNativeRowSelected(row, selected) {
+    const checkboxBox = getNativeRowCheckboxBox(row);
+
+    if (!checkboxBox) {
+      return;
+    }
+
+    if (isNativeRowSelected(row) !== selected) {
+      checkboxBox.click();
+    }
+  }
+
+  function isRowSelected(row, config = getCurrentConfig()) {
+    if (usesCustomSelection(config)) {
+      return state.selectedKeys.has(getRowKey(row, config));
+    }
+
+    return isNativeRowSelected(row);
+  }
+
+  function getSelectedRows(root = getTableRoot(), config = getCurrentConfig()) {
+    return getDataRows(root).filter((row) => isRowSelected(row, config));
+  }
+
+  function syncRowHighlight(root = getTableRoot(), config = getCurrentConfig()) {
     getDataRows(root).forEach((row) => {
-      const checkbox = ensureRowCheckbox(row);
+      row.classList.toggle("ctfp-row-selected", isRowSelected(row, config));
+    });
+  }
 
-      if (!checkbox) {
-        return;
-      }
+  function setAllVisibleRows(selected, root = getTableRoot(), config = getCurrentConfig()) {
+    if (usesCustomSelection(config)) {
+      getDataRows(root).forEach((row) => {
+        const checkbox = ensureRowCheckbox(row);
 
-      checkbox.checked = selected;
-      setRowSelected(row, selected);
+        if (!checkbox) {
+          return;
+        }
+
+        checkbox.checked = selected;
+        setRowSelected(row, selected, config);
+      });
+
+      syncMasterCheckbox(root, config);
+      syncRowHighlight(root, config);
+      updateToolbarStatus(root, config);
+      return;
+    }
+
+    getDataRows(root).forEach((row) => {
+      setNativeRowSelected(row, selected);
     });
 
-    syncMasterCheckbox(root);
-    updateToolbarStatus(root);
+    window.setTimeout(() => {
+      syncRowHighlight(root, config);
+      updateToolbarStatus(root, config);
+    }, 0);
   }
 
-  function clearVisibleSelection(root = getTableRoot()) {
-    setAllVisibleRows(false, root);
+  function clearVisibleSelection(root = getTableRoot(), config = getCurrentConfig()) {
+    setAllVisibleRows(false, root, config);
   }
 
-  function syncMasterCheckbox(root = getTableRoot()) {
+  function syncMasterCheckbox(root = getTableRoot(), config = getCurrentConfig()) {
+    if (!usesCustomSelection(config)) {
+      return;
+    }
+
     const master = root?.querySelector(`#${MASTER_CHECKBOX_ID}`);
     const rows = getDataRows(root);
 
@@ -287,15 +402,13 @@
       return;
     }
 
-    const selectedCount = rows.filter((row) =>
-      state.selectedKeys.has(getRowKey(row))
-    ).length;
+    const selectedCount = rows.filter((row) => isRowSelected(row, config)).length;
 
     master.checked = selectedCount > 0 && selectedCount === rows.length;
     master.indeterminate = selectedCount > 0 && selectedCount < rows.length;
   }
 
-  function syncToolbarDisabledState(root = getTableRoot()) {
+  function syncToolbarDisabledState(root = getTableRoot(), config = getCurrentConfig()) {
     const toolbar = getToolbar(root);
 
     if (!toolbar) {
@@ -315,19 +428,25 @@
       stopButton.disabled = !state.isDownloading;
     }
 
-    const masterCheckbox = root?.querySelector(`#${MASTER_CHECKBOX_ID}`);
-    if (masterCheckbox) {
-      masterCheckbox.disabled = disableDuringRun;
-    }
+    if (usesCustomSelection(config)) {
+      const masterCheckbox = root?.querySelector(`#${MASTER_CHECKBOX_ID}`);
+      if (masterCheckbox) {
+        masterCheckbox.disabled = disableDuringRun;
+      }
 
-    root
-      ?.querySelectorAll(`.${ROW_CHECKBOX_CLASS}`)
-      .forEach((checkbox) => {
-        checkbox.disabled = disableDuringRun;
-      });
+      root
+        ?.querySelectorAll(`.${ROW_CHECKBOX_CLASS}`)
+        .forEach((checkbox) => {
+          checkbox.disabled = disableDuringRun;
+        });
+    }
   }
 
-  function updateToolbarStatus(root = getTableRoot(), customMessage = "") {
+  function updateToolbarStatus(
+    root = getTableRoot(),
+    config = getCurrentConfig(),
+    customMessage = ""
+  ) {
     const status = getToolbar(root)?.querySelector(".ctfp-status");
 
     if (!status) {
@@ -340,36 +459,35 @@
     }
 
     const rows = getDataRows(root);
-    const selectedCount = rows.filter((row) =>
-      state.selectedKeys.has(getRowKey(row))
-    ).length;
+    const selectedCount = getSelectedRows(root, config).length;
 
     if (state.isDownloading) {
-      const suffix = state.shouldStop ? " Stop sedang diproses." : "";
-      status.textContent = `Mengunduh ${state.progressCurrent}/${state.progressTotal} file.${suffix}`;
+      const suffix = state.shouldStop ? " · stop" : "";
+      status.textContent = `${state.progressCurrent}/${state.progressTotal} berjalan${suffix}`;
       return;
     }
 
     if (!rows.length) {
-      status.textContent = "Tabel belum siap atau tidak ada data pada halaman ini.";
+      status.textContent = "Tidak ada data";
       return;
     }
 
     const delay = getDelayMs(root);
-    status.textContent = `${selectedCount} baris dipilih pada halaman ini. Delay antar download ${delay} ms.`;
+    const helperText = usesCustomSelection(config)
+      ? "ext"
+      : "coretax";
+    status.textContent = `${selectedCount} dipilih · ${helperText} · ${delay} ms`;
   }
 
-  async function startDownload(root = getTableRoot()) {
+  async function startDownload(root = getTableRoot(), config = getCurrentConfig()) {
     if (state.isDownloading) {
       return;
     }
 
-    const rows = getDataRows(root).filter((row) =>
-      state.selectedKeys.has(getRowKey(row))
-    );
+    const rows = getSelectedRows(root, config);
 
     if (!rows.length) {
-      updateToolbarStatus(root, "Pilih minimal satu baris pada halaman ini.");
+      updateToolbarStatus(root, config, "Pilih data dulu");
       return;
     }
 
@@ -380,8 +498,8 @@
     state.progressCurrent = 0;
     state.progressTotal = rows.length;
 
-    syncToolbarDisabledState(root);
-    updateToolbarStatus(root, `Mengunduh 0/${rows.length} file.`);
+    syncToolbarDisabledState(root, config);
+    updateToolbarStatus(root, config, `0/${rows.length} berjalan`);
 
     for (const row of rows) {
       if (state.shouldStop) {
@@ -391,7 +509,7 @@
       state.progressCurrent += 1;
       row.classList.add("ctfp-row-processing");
 
-      const button = row.querySelector(DOWNLOAD_BUTTON_SELECTOR);
+      const button = row.querySelector(config.downloadButtonSelector);
 
       if (button && !button.disabled) {
         button.scrollIntoView({
@@ -403,11 +521,12 @@
       } else {
         updateToolbarStatus(
           root,
-          `Baris ${state.progressCurrent}/${rows.length} dilewati karena tombol PDF tidak ditemukan.`
+          config,
+          `${state.progressCurrent}/${rows.length} dilewati`
         );
       }
 
-      updateToolbarStatus(root);
+      updateToolbarStatus(root, config);
       await sleep(delayMs);
       row.classList.remove("ctfp-row-processing");
     }
@@ -416,16 +535,43 @@
 
     state.isDownloading = false;
     state.shouldStop = false;
-    syncToolbarDisabledState(root);
+    syncToolbarDisabledState(root, config);
 
     if (didStop) {
       updateToolbarStatus(
         root,
-        `Proses dihentikan pada ${state.progressCurrent}/${state.progressTotal} file.`
+        config,
+        `Stop di ${state.progressCurrent}/${state.progressTotal}`
       );
     } else {
-      updateToolbarStatus(root, `Selesai memicu ${state.progressTotal} download.`);
+      updateToolbarStatus(root, config, `Selesai ${state.progressTotal} file`);
     }
+  }
+
+  function ensureTableListeners(root = getTableRoot()) {
+    if (!root || root.dataset.ctfpListenersBound === "true") {
+      return;
+    }
+
+    const syncLater = () => {
+      window.setTimeout(() => {
+        scheduleRender();
+      }, 0);
+    };
+
+    root.addEventListener("click", (event) => {
+      if (event.target.closest(".p-checkbox-box, .ctfp-row-toggle, .ctfp-header-toggle")) {
+        syncLater();
+      }
+    });
+
+    root.addEventListener("change", (event) => {
+      if (event.target.closest('input[type="checkbox"]')) {
+        syncLater();
+      }
+    });
+
+    root.dataset.ctfpListenersBound = "true";
   }
 
   function observeTable(root = getTableRoot()) {
@@ -459,8 +605,22 @@
   }
 
   function render() {
-    if (!isSupportedPage()) {
+    const config = getCurrentConfig();
+
+    if (!config) {
+      state.currentPageKey = null;
+      state.selectedKeys.clear();
+      if (state.observer) {
+        state.observer.disconnect();
+        state.observer = null;
+        state.observedRoot = null;
+      }
       return;
+    }
+
+    if (state.currentPageKey !== config.key) {
+      state.currentPageKey = config.key;
+      state.selectedKeys.clear();
     }
 
     const root = getTableRoot();
@@ -469,13 +629,16 @@
       return;
     }
 
-    pruneSelection(root);
-    ensureToolbar(root);
-    ensureHeaderCheckbox(root);
-    ensureRowCheckboxes(root);
-    syncMasterCheckbox(root);
-    syncToolbarDisabledState(root);
-    updateToolbarStatus(root);
+    ensureTableListeners(root);
+    pruneSelection(root, config);
+    cleanupCustomSelectionUI(root, config);
+    ensureToolbar(root, config);
+    ensureHeaderCheckbox(root, config);
+    ensureRowCheckboxes(root, config);
+    syncMasterCheckbox(root, config);
+    syncRowHighlight(root, config);
+    syncToolbarDisabledState(root, config);
+    updateToolbarStatus(root, config);
     observeTable(root);
   }
 

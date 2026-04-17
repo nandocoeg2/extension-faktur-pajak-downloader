@@ -2,19 +2,21 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  margin-top: 12px;
-  padding: 12px 14px;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 10px;
   border: 1px solid #f0d39b;
-  border-radius: 12px;
+  border-radius: 10px;
   background: linear-gradient(135deg, #fff8e6 0%, #fff2c9 100%);
-  box-shadow: 0 8px 24px rgba(125, 89, 0, 0.08);
+  box-shadow: 0 4px 14px rgba(125, 89, 0, 0.06);
 }
 
 #ctfp-toolbar .ctfp-toolbar-title {
+  font-size: 0.98rem;
   font-weight: 700;
   color: #774500;
-  margin-right: 4px;
+  margin-right: 2px;
+  white-space: nowrap;
 }
 
 #ctfp-toolbar .ctfp-btn {
@@ -25,11 +27,13 @@
   color: #5a3c00;
   cursor: pointer;
   font: inherit;
-  font-size: 0.92rem;
+  font-size: 0.84rem;
   font-weight: 600;
   line-height: 1;
-  padding: 0.7rem 0.95rem;
+  min-height: 34px;
+  padding: 0.55rem 0.85rem;
   transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+  white-space: nowrap;
 }
 
 #ctfp-toolbar .ctfp-btn:hover:not(:disabled) {
@@ -61,15 +65,17 @@
 #ctfp-toolbar .ctfp-delay {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   color: #6b4d0a;
-  font-size: 0.92rem;
+  font-size: 0.84rem;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 #ctfp-toolbar .ctfp-delay-input {
-  width: 88px;
-  padding: 0.45rem 0.55rem;
+  width: 72px;
+  min-height: 34px;
+  padding: 0.35rem 0.45rem;
   border: 1px solid #d8b36d;
   border-radius: 8px;
   background: #ffffff;
@@ -78,9 +84,19 @@
 }
 
 #ctfp-toolbar .ctfp-status {
-  min-width: 260px;
+  margin-left: auto;
   color: #5a3c00;
-  font-size: 0.92rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+@media (max-width: 1180px) {
+  #ctfp-toolbar .ctfp-status {
+    margin-left: 0;
+    flex-basis: 100%;
+    white-space: normal;
+  }
 }
 
 .ctfp-header-toggle,
