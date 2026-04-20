@@ -345,6 +345,20 @@
     return getDataRows(root).filter((row) => isRowSelected(row, config));
   }
 
+  function findRowByKey(rowKey, root = getTableRoot(), config = getCurrentConfig()) {
+    return (
+      getDataRows(root).find((row) => getRowKey(row, config) === rowKey) ?? null
+    );
+  }
+
+  function getNativeHeaderCheckboxBox(root = getTableRoot()) {
+    return (
+      root?.querySelector(
+        'thead p-tableheadercheckbox .p-checkbox-box[role="checkbox"], thead [role="checkbox"].p-checkbox-box'
+      ) ?? null
+    );
+  }
+
   function syncRowHighlight(root = getTableRoot(), config = getCurrentConfig()) {
     getDataRows(root).forEach((row) => {
       row.classList.toggle("ctfp-row-selected", isRowSelected(row, config));
@@ -370,9 +384,27 @@
       return;
     }
 
-    getDataRows(root).forEach((row) => {
-      setNativeRowSelected(row, selected);
-    });
+    const headerCheckboxBox = getNativeHeaderCheckboxBox(root);
+
+    if (headerCheckboxBox) {
+      const currentState = headerCheckboxBox.getAttribute("aria-checked");
+      const shouldClick = selected
+        ? currentState !== "true"
+        : currentState !== "false";
+
+      if (shouldClick) {
+        headerCheckboxBox.click();
+      }
+    } else {
+      const rowKeys = getDataRows(root).map((row) => getRowKey(row, config));
+
+      rowKeys.forEach((rowKey) => {
+        const activeRow = findRowByKey(rowKey, root, config);
+        if (activeRow) {
+          setNativeRowSelected(activeRow, selected);
+        }
+      });
+    }
 
     window.setTimeout(() => {
       syncRowHighlight(root, config);
@@ -484,9 +516,9 @@
       return;
     }
 
-    const rows = getSelectedRows(root, config);
+    const rowKeys = getSelectedRows(root, config).map((row) => getRowKey(row, config));
 
-    if (!rows.length) {
+    if (!rowKeys.length) {
       updateToolbarStatus(root, config, "Pilih data dulu");
       return;
     }
@@ -496,20 +528,32 @@
     state.isDownloading = true;
     state.shouldStop = false;
     state.progressCurrent = 0;
-    state.progressTotal = rows.length;
+    state.progressTotal = rowKeys.length;
 
     syncToolbarDisabledState(root, config);
-    updateToolbarStatus(root, config, `0/${rows.length} berjalan`);
+    updateToolbarStatus(root, config, `0/${rowKeys.length} berjalan`);
 
-    for (const row of rows) {
+    for (const rowKey of rowKeys) {
       if (state.shouldStop) {
         break;
       }
 
       state.progressCurrent += 1;
-      row.classList.add("ctfp-row-processing");
+      const activeRow = findRowByKey(rowKey, root, config);
 
-      const button = row.querySelector(config.downloadButtonSelector);
+      if (!activeRow) {
+        updateToolbarStatus(
+          root,
+          config,
+          `${state.progressCurrent}/${rowKeys.length} tidak ditemukan`
+        );
+        await sleep(delayMs);
+        continue;
+      }
+
+      activeRow.classList.add("ctfp-row-processing");
+
+      const button = activeRow.querySelector(config.downloadButtonSelector);
 
       if (button && !button.disabled) {
         button.scrollIntoView({
@@ -522,13 +566,13 @@
         updateToolbarStatus(
           root,
           config,
-          `${state.progressCurrent}/${rows.length} dilewati`
+          `${state.progressCurrent}/${rowKeys.length} dilewati`
         );
       }
 
       updateToolbarStatus(root, config);
       await sleep(delayMs);
-      row.classList.remove("ctfp-row-processing");
+      activeRow.classList.remove("ctfp-row-processing");
     }
 
     const didStop = state.shouldStop;
