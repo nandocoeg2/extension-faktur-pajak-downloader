@@ -184,7 +184,7 @@
       toolbar
         .querySelector('[data-action="download"]')
         ?.addEventListener("click", () => {
-          void startDownload(root, config);
+          void startDownload();
         });
 
       toolbar.querySelector('[data-action="stop"]')?.addEventListener("click", () => {
@@ -511,10 +511,13 @@
     status.textContent = `${selectedCount} dipilih · ${helperText} · ${delay} ms`;
   }
 
-  async function startDownload(root = getTableRoot(), config = getCurrentConfig()) {
+  async function startDownload() {
     if (state.isDownloading) {
       return;
     }
+
+    const config = getCurrentConfig();
+    let root = getTableRoot();
 
     const rowKeys = getSelectedRows(root, config).map((row) => getRowKey(row, config));
 
@@ -535,6 +538,12 @@
 
     for (const rowKey of rowKeys) {
       if (state.shouldStop) {
+        break;
+      }
+
+      // Re-query fresh root every iteration — PrimeNG re-renders DOM after downloads
+      root = getTableRoot();
+      if (!root) {
         break;
       }
 
@@ -579,6 +588,9 @@
 
     state.isDownloading = false;
     state.shouldStop = false;
+
+    // Re-query fresh root for final status update
+    root = getTableRoot();
     syncToolbarDisabledState(root, config);
 
     if (didStop) {
